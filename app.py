@@ -22,8 +22,127 @@ from core.indicators import add_moving_averages, add_rsi, add_bollinger_bands, a
 from core.backtester import run_backtest
 from strategies.rule_based import ma_cross_strategy, rsi_mean_reversion_strategy, bollinger_strategy
 from strategies.ml_strategy import ml_direction_strategy
+from selection.main_wave_selector import run_main_wave_candidate_selection
+from stock_pools.sector_map import STOCK_SECTOR_MAP
+
+
+def _parse_stock_pool(raw_text: str) -> list[str]:
+    normalized = raw_text.replace(",", "\n").replace("，", "\n")
+    symbols = []
+    for value in normalized.splitlines():
+        symbol = value.strip()
+        if symbol and symbol not in symbols:
+            symbols.append(symbol)
+    return symbols
+
+
+def render_main_wave_page() -> None:
+    st.title("主升浪候选股 Top20")
+    st.caption("规则型候选池：动量因子 · 板块因子 · 量价因子 · 风险过滤")
+
+    today = pd.Timestamp.today().normalize()
+    default_pool = "\n".join(STOCK_SECTOR_MAP.keys())
+    with st.sidebar:
+        st.header("候选池设置")
+        pool_text = st.text_area(
+            "股票池",
+            value=default_pool,
+            height=220,
+            help="支持英文/中文逗号或换行分隔。",
+            key="main_wave_pool",
+        )
+        wave_start = st.date_input(
+            "开始日期",
+            value=today - pd.Timedelta(days=180),
+            key="main_wave_start",
+        )
+        wave_end = st.date_input("结束日期", value=today, key="main_wave_end")
+        specify_date = st.checkbox("指定选择日期", value=False, key="main_wave_use_date")
+        wave_select_date = (
+            st.date_input("选择日期", value=wave_end, key="main_wave_select_date")
+            if specify_date
+            else None
+        )
+        wave_top_n = st.number_input(
+            "Top N", min_value=1, max_value=100, value=20, step=1, key="main_wave_top_n"
+        )
+        wave_adjust_label = st.selectbox(
+            "复权方式",
+            ["前复权 qfq", "不复权", "后复权 hfq"],
+            key="main_wave_adjust",
+        )
+        wave_adjust = {
+            "前复权 qfq": "qfq",
+            "不复权": "",
+            "后复权 hfq": "hfq",
+        }[wave_adjust_label]
+        wave_source = st.selectbox(
+            "数据源", ["自动", "东方财富", "新浪"], key="main_wave_source"
+        )
+        wave_use_cache = st.checkbox(
+            "启用本地行情缓存", value=True, key="main_wave_cache"
+        )
+        wave_disable_proxy = st.checkbox(
+            "忽略系统代理环境变量", value=True, key="main_wave_proxy"
+        )
+        generate = st.button("生成候选池", type="primary", key="main_wave_generate")
+
+    st.info("候选池仅用于研究，不构成投资建议。建议至少选择约 90 个交易日的数据。")
+    if not generate:
+        st.write("设置股票池和日期后，点击“生成候选池”。")
+        return
+
+    symbols = _parse_stock_pool(pool_text)
+    if not symbols:
+        st.warning("股票池为空，请至少输入一个 A 股代码。")
+        return
+    if pd.to_datetime(wave_start) > pd.to_datetime(wave_end):
+        st.warning("开始日期不能晚于结束日期。")
+        return
+
+    try:
+        with st.spinner(f"正在计算 {len(symbols)} 只股票的候选排名……"):
+            result = run_main_wave_candidate_selection(
+                symbols=symbols,
+                start=str(wave_start),
+                end=str(wave_end),
+                select_date=str(wave_select_date) if wave_select_date else None,
+                top_n=int(wave_top_n),
+                adjust=wave_adjust,
+                source=wave_source,
+                use_cache=wave_use_cache,
+                disable_proxy=wave_disable_proxy,
+            )
+    except Exception as exc:
+        st.error(f"候选池生成失败：{exc}")
+        return
+
+    errors = result.attrs.get("errors", [])
+    if errors:
+        st.warning(f"有 {len(errors)} 只股票处理失败，其他股票已继续计算。")
+        with st.expander("查看失败明细"):
+            for error in errors:
+                st.write(f"- {error}")
+
+    if result.empty:
+        st.warning("没有股票通过当前风险过滤条件，请检查日期范围、数据源或股票池。")
+        return
+
+    st.subheader(f"候选结果 Top {len(result)}")
+    st.dataframe(result, use_container_width=True, hide_index=True)
+    st.download_button(
+        "下载候选池 CSV",
+        result.to_csv(index=False).encode("utf-8-sig"),
+        file_name="main_wave_candidates.csv",
+        mime="text/csv",
+    )
 
 st.set_page_config(page_title="Quant Trading Platform", layout="wide")
+
+page_name = st.sidebar.radio("页面", ["单股回测", "主升浪候选池"])
+if page_name == "主升浪候选池":
+    render_main_wave_page()
+    st.stop()
 
 st.title("A股量化交易平台 MVP+")
 st.caption("A股数据 · K线技术指标 · 策略回测 · 真实交易规则近似 · 机器学习方向预测")
