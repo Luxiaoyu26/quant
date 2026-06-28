@@ -32,19 +32,28 @@
 
 当前板块映射为小型静态示例，未知股票归入“未知板块”。后续应替换为可维护的行业分类数据。
 
-## 综合分公式
+## V2 主升浪前兆评分
 
 ```text
-final_score =
-    0.25 × ret_20_score
-  + 0.15 × ret_60_score
-  + 0.15 × breakout_score
-  + 0.15 × volume_score
+main_wave_score =
+    0.20 × ret_20_score
+  + 0.10 × ret_60_score
+  + 0.15 × near_high_score
+  + 0.15 × trend_structure_score
+  + 0.15 × volume_breakout_score
   + 0.20 × sector_strength_score
-  + 0.10 × low_vol_score
+  + 0.05 × risk_score
+
+risk_penalty_score = 0.05 × (1 - risk_score)
+final_score = max(main_wave_score - risk_penalty_score, 0)
 ```
 
-其中个股收益、量能和波动率使用当日股票截面的百分位排名；低波动分采用反向排名；突破分由 20 日突破和 60 日突破按 0.6/0.4 加权。
+- `near_high_score`：20 日和 60 日新高接近度的截面排名等权合成。
+- `trend_structure_score`：收盘价高于 MA20、收盘价高于 MA60、MA20 高于 MA60，各占三分之一。
+- `volume_breakout_score`：5/20 日量比、20/60 日量比、上涨/下跌日量比按 0.40/0.30/0.30 加权。
+- `risk_score`：按 20 日波动率分档，风险仅占小权重，并通过独立惩罚项扣分。
+
+量价截面字段部分缺失时使用当日截面中位数；整列缺失时该子分数按 0 处理，避免单只股票的数据问题中断整个候选池。
 
 ## 风险过滤
 

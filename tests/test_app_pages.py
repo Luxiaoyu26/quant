@@ -11,6 +11,7 @@ def test_app_exposes_single_stock_and_main_wave_pages():
     assert '["单股回测", "主升浪候选池"]' in source
     assert "def render_main_wave_page" in source
     assert "run_main_wave_candidate_selection" in source
+    assert "当前 V2 主升浪评分重点关注" in source
 
 
 @pytest.mark.filterwarnings("ignore:Type google.protobuf.*:DeprecationWarning")
@@ -55,5 +56,10 @@ def test_main_wave_page_generates_default_pool_result(monkeypatch):
         "ret_20",
         "ret_60",
         "sector_strength_score",
+        "main_wave_score",
+        "near_high_score",
+        "trend_structure_score",
+        "volume_breakout_score",
+        "risk_score",
     }.issubset(result.columns)
     assert len(app.get("download_button")) == 1

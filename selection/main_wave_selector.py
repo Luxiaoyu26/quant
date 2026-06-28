@@ -3,6 +3,7 @@ from __future__ import annotations
 import pandas as pd
 
 from core.data_loader import load_price_data, normalize_a_share_symbol
+from factors.main_wave_scores import calculate_main_wave_scores
 from factors.momentum_factors import calculate_momentum_features
 from factors.risk_filters import apply_candidate_filters
 from factors.sector_factors import calculate_sector_strength
@@ -16,15 +17,28 @@ RESULT_COLUMNS = [
     "sector",
     "feature_date",
     "final_score",
+    "main_wave_score",
+    "raw_score",
+    "near_high_score",
+    "trend_structure_score",
+    "volume_breakout_score",
+    "risk_score",
+    "risk_penalty_score",
     "ret_5",
     "ret_20",
     "ret_60",
+    "near_high_20",
+    "near_high_60",
     "breakout_20",
     "breakout_60",
     "volume_ratio_5_20",
     "volume_ratio_20_60",
     "volatility_20",
     "sector_strength_score",
+    "sector_ret_5_mean",
+    "sector_ret_20_mean",
+    "sector_volume_strength",
+    "sector_breakout_ratio",
     "filter_pass",
     "filter_reason",
 ]
@@ -97,24 +111,7 @@ def run_main_wave_candidate_selection(
     if candidates.empty:
         return _empty_result(errors)
 
-    candidates["ret_20_score"] = candidates["ret_20"].rank(pct=True)
-    candidates["ret_60_score"] = candidates["ret_60"].rank(pct=True)
-    candidates["breakout_score"] = (
-        candidates["breakout_20"].fillna(False).astype(float) * 0.6
-        + candidates["breakout_60"].fillna(False).astype(float) * 0.4
-    )
-    candidates["volume_score"] = candidates["volume_ratio_5_20"].rank(pct=True)
-    candidates["low_vol_score"] = candidates["volatility_20"].rank(
-        pct=True, ascending=False
-    )
-    candidates["final_score"] = (
-        0.25 * candidates["ret_20_score"]
-        + 0.15 * candidates["ret_60_score"]
-        + 0.15 * candidates["breakout_score"]
-        + 0.15 * candidates["volume_score"]
-        + 0.20 * candidates["sector_strength_score"]
-        + 0.10 * candidates["low_vol_score"]
-    )
+    candidates = calculate_main_wave_scores(candidates)
     candidates = candidates.sort_values("final_score", ascending=False).head(int(top_n))
     candidates.insert(0, "rank", range(1, len(candidates) + 1))
     result = candidates[RESULT_COLUMNS].reset_index(drop=True)

@@ -50,7 +50,20 @@ def test_selector_returns_ranked_candidates_and_skips_failed_symbol(monkeypatch)
         "volume_ratio_5_20",
         "volatility_20",
         "sector_strength_score",
+        "main_wave_score",
+        "raw_score",
+        "near_high_score",
+        "trend_structure_score",
+        "volume_breakout_score",
+        "risk_score",
+        "near_high_20",
+        "near_high_60",
+        "sector_ret_5_mean",
+        "sector_ret_20_mean",
+        "sector_volume_strength",
+        "sector_breakout_ratio",
     }.issubset(result.columns)
+    assert (result["final_score"] <= result["main_wave_score"]).all()
 
 
 def test_default_stock_pool_can_produce_candidates_without_network(monkeypatch):

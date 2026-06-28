@@ -87,6 +87,18 @@ def render_main_wave_page() -> None:
         )
         generate = st.button("生成候选池", type="primary", key="main_wave_generate")
 
+    st.markdown(
+        """
+**当前 V2 主升浪评分重点关注：**
+
+1. 个股 20 日 / 60 日动量；
+2. 是否接近 20 日 / 60 日新高；
+3. 均线趋势结构；
+4. 放量突破迹象；
+5. 板块强度；
+6. 风险惩罚。
+        """
+    )
     st.info("候选池仅用于研究，不构成投资建议。建议至少选择约 90 个交易日的数据。")
     if not generate:
         st.write("设置股票池和日期后，点击“生成候选池”。")
