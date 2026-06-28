@@ -49,7 +49,7 @@
 
 ### Task 4: Verification and feature commit
 
-- [ ] Run all tests and Python compilation.
-- [ ] Verify the selector with deterministic sample data.
-- [ ] Start Streamlit headlessly and verify both page labels are present.
-- [ ] Commit all changes on `feature/main-wave-top20` without merging into `main`.
+- [x] Run all tests and Python compilation.
+- [x] Verify the selector with deterministic sample data.
+- [x] Start Streamlit headlessly and verify both page labels are present.
+- [x] Commit all changes on `feature/main-wave-top20` without merging into `main`.
