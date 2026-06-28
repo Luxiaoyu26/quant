@@ -1,0 +1,25 @@
+market:
+  default_market: "A股"
+  default_symbol: "600519"
+  default_start: "2020-01-01"
+  default_adjust: "qfq"
+
+data:
+  use_cache: true
+  cache_dir: "data_cache"
+  default_source: "自动"
+  disable_proxy: true
+
+backtest:
+  initial_cash: 100000
+  commission_rate: 0.0003
+  min_commission: 5
+  sell_tax_rate: 0.0005
+  slippage_rate: 0.0005
+  lot_size: 100
+  enable_t1: true
+  enable_limit_filter: true
+
+risk:
+  max_position_pct: 0.95
+  max_single_trade_pct: 0.5
