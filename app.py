@@ -17,13 +17,17 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from core.data_loader import clear_data_cache, load_csv_data, load_price_data
-from core.indicators import add_moving_averages, add_rsi, add_bollinger_bands, add_macd
 from core.backtester import run_backtest
-from strategies.rule_based import ma_cross_strategy, rsi_mean_reversion_strategy, bollinger_strategy
-from strategies.ml_strategy import ml_direction_strategy
+from core.data_loader import clear_data_cache, load_csv_data, load_price_data
+from core.indicators import add_bollinger_bands, add_macd, add_moving_averages, add_rsi
 from selection.main_wave_selector import run_main_wave_candidate_selection
 from stock_pools.sector_map import STOCK_SECTOR_MAP
+from strategies.ml_strategy import ml_direction_strategy
+from strategies.rule_based import (
+    bollinger_strategy,
+    ma_cross_strategy,
+    rsi_mean_reversion_strategy,
+)
 
 
 def _parse_stock_pool(raw_text: str) -> list[str]:
@@ -38,7 +42,7 @@ def _parse_stock_pool(raw_text: str) -> list[str]:
 
 def render_main_wave_page() -> None:
     st.title("主升浪候选股 Top20")
-    st.caption("规则型候选池：动量因子 · 板块因子 · 量价因子 · 风险过滤")
+    st.caption("规则型候选池：个股动量、板块强度、量价因子、风险过滤")
 
     today = pd.Timestamp.today().normalize()
     default_pool = "\n".join(STOCK_SECTOR_MAP.keys())
@@ -48,7 +52,7 @@ def render_main_wave_page() -> None:
             "股票池",
             value=default_pool,
             height=220,
-            help="支持英文/中文逗号或换行分隔。",
+            help="支持逗号或换行输入多个 A 股代码。",
             key="main_wave_pool",
         )
         wave_start = st.date_input(
@@ -113,7 +117,7 @@ def render_main_wave_page() -> None:
         return
 
     try:
-        with st.spinner(f"正在计算 {len(symbols)} 只股票的候选排名……"):
+        with st.spinner(f"正在计算 {len(symbols)} 只股票的候选排名…"):
             result = run_main_wave_candidate_selection(
                 symbols=symbols,
                 start=str(wave_start),
@@ -136,8 +140,29 @@ def render_main_wave_page() -> None:
             for error in errors:
                 st.write(f"- {error}")
 
+    requested_notice_date = pd.to_datetime(wave_select_date or wave_end)
+    if not result.empty and "actual_feature_date" in result.columns:
+        # Keep requested_select_date and actual_feature_date visible in the output table for traceability.
+        actual_dates = pd.to_datetime(result["actual_feature_date"], errors="coerce").dropna()
+        fallback_dates = sorted(
+            {
+                actual_date.strftime("%Y-%m-%d")
+                for actual_date in actual_dates
+                if actual_date < requested_notice_date
+            }
+        )
+        if fallback_dates:
+            st.info(
+                "选择日期不是有效交易日或数据源尚未更新，已自动使用最近可用交易日："
+                + "、".join(fallback_dates)
+                + "。"
+            )
+
     if result.empty:
-        st.warning("没有股票通过当前风险过滤条件，请检查日期范围、数据源或股票池。")
+        st.warning(
+            "没有候选结果。结束日期可能不是交易日；数据源可能尚未更新；"
+            "请尝试选择最近一个已收盘交易日；或扩大日期范围。"
+        )
         return
 
     st.subheader(f"候选结果 Top {len(result)}")
@@ -149,6 +174,7 @@ def render_main_wave_page() -> None:
         mime="text/csv",
     )
 
+
 st.set_page_config(page_title="Quant Trading Platform", layout="wide")
 
 page_name = st.sidebar.radio("页面", ["单股回测", "主升浪候选池"])
@@ -157,7 +183,7 @@ if page_name == "主升浪候选池":
     st.stop()
 
 st.title("A股量化交易平台 MVP+")
-st.caption("A股数据 · K线技术指标 · 策略回测 · 真实交易规则近似 · 机器学习方向预测")
+st.caption("A股数据、K线技术指标、策略回测、真实交易规则近似、机器学习方向预测")
 
 with st.sidebar:
     st.header("基础设置")
@@ -181,7 +207,11 @@ with st.sidebar:
     adjust = "qfq"
 
     if market == "A股":
-        symbol = st.text_input("股票代码", value="600519", help="A股示例：600519 贵州茅台；000001 平安银行；300750 宁德时代；也支持 600519.SH / 000001.SZ")
+        symbol = st.text_input(
+            "股票代码",
+            value="600519",
+            help="A股示例：600519、000001、300750；也支持 600519.SH / 000001.SZ",
+        )
         source_label = st.selectbox(
             "A股数据源",
             ["自动", "东方财富", "新浪", "本地CSV"],
@@ -197,7 +227,7 @@ with st.sidebar:
             uploaded_file = st.file_uploader(
                 "上传本地行情 CSV",
                 type=["csv"],
-                help="CSV 需包含 Date、Open、High、Low、Close、Volume 字段，字段名大小写均可。",
+                help="CSV 需包含 Date、Open、High、Low、Close、Volume 字段。",
             )
         adjust_label = st.selectbox("复权方式", ["前复权 qfq", "不复权", "后复权 hfq"], index=0)
         adjust = {"前复权 qfq": "qfq", "不复权": "", "后复权 hfq": "hfq"}[adjust_label]
@@ -205,7 +235,11 @@ with st.sidebar:
         default_slippage = 0.0002
         default_sell_tax = 0.0005
     else:
-        symbol = st.text_input("股票代码", value="AAPL", help="美股示例：AAPL, MSFT, TSLA；港股示例可能需要 .HK 后缀")
+        symbol = st.text_input(
+            "股票代码",
+            value="AAPL",
+            help="美股示例：AAPL、MSFT、TSLA；港股示例可带 .HK 后缀",
+        )
         adjust = "none"
         data_source = "yfinance"
         disable_proxy = True
@@ -217,16 +251,35 @@ with st.sidebar:
     end = st.date_input("结束日期", value=pd.to_datetime("2025-01-01"))
     initial_cash = st.number_input("初始资金", min_value=1000.0, value=100000.0, step=10000.0)
     fee_rate = st.number_input("佣金/双边费率", min_value=0.0, value=default_fee, step=0.0001, format="%.4f")
-    slippage_rate = st.number_input("滑点率", min_value=0.0, value=default_slippage, step=0.0001, format="%.4f")
-    sell_tax_rate = st.number_input("卖出印花税/单边税率", min_value=0.0, value=default_sell_tax, step=0.0001, format="%.4f", help="A股默认按卖出单边 0.05% 近似；可按你的券商实际费率调整。")
+    slippage_rate = st.number_input("滑点费率", min_value=0.0, value=default_slippage, step=0.0001, format="%.4f")
+    sell_tax_rate = st.number_input(
+        "卖出印花税/单边税率",
+        min_value=0.0,
+        value=default_sell_tax,
+        step=0.0001,
+        format="%.4f",
+        help="A股默认按卖出单边 0.05% 近似，可按你的券商实际费率调整。",
+    )
 
     st.header("A股真实规则近似")
     if market == "A股":
-        lot_size = st.number_input("最小交易单位/一手", min_value=1, value=100, step=100, help="A股普通股票通常买入至少 100 股，卖出可卖持仓。这里为简化按买入整数手处理。")
+        lot_size = st.number_input(
+            "最小交易单位（一手）",
+            min_value=1,
+            value=100,
+            step=100,
+            help="A股普通股票通常买入至少 100 股，卖出可卖持仓。这里简化为按整数手处理。",
+        )
         min_commission = st.number_input("最低佣金", min_value=0.0, value=5.0, step=1.0)
         enable_t1 = st.checkbox("启用 T+1 卖出限制", value=True)
         enable_limit_filter = st.checkbox("启用涨跌停无法成交近似", value=True)
-        limit_rate = st.selectbox("涨跌停幅度近似", [0.10, 0.20, 0.05], index=0, format_func=lambda x: f"{x:.0%}", help="主板常见 10%，创业板/科创板常见 20%，ST 常见 5%。这里只做日线近似。")
+        limit_rate = st.selectbox(
+            "涨跌停幅度近似",
+            [0.10, 0.20, 0.05],
+            index=0,
+            format_func=lambda x: f"{x:.0%}",
+            help="主板常见 10%，创业板/科创板常见 20%，ST 常见 5%。这里仅做日线近似。",
+        )
     else:
         lot_size = 1
         min_commission = 0.0
@@ -234,8 +287,13 @@ with st.sidebar:
         enable_limit_filter = False
         limit_rate = 0.10
 
-    trade_price_label = st.selectbox("成交价格", ["次日开盘价 Open", "次日收盘价 Close"], index=0, help="策略信号已经 shift 一天，默认用次日开盘价撮合，更接近实盘。")
-    trade_price_col = "Open" if trade_price_label.startswith("次日开盘") else "Close"
+    trade_price_label = st.selectbox(
+        "成交价格",
+        ["次日开盘价 Open", "次日收盘价 Close"],
+        index=0,
+        help="策略信号已经 shift 一天，默认用次日开盘价撮合，更接近实盘。",
+    )
+    trade_price_col = "Open" if trade_price_label.startswith("次日开盘价") else "Close"
 
     st.header("策略选择")
     strategy_name = st.selectbox(
@@ -270,14 +328,16 @@ def num(x):
 
 def plot_price(df: pd.DataFrame, title: str):
     fig = go.Figure()
-    fig.add_trace(go.Candlestick(
-        x=df.index,
-        open=df["Open"],
-        high=df["High"],
-        low=df["Low"],
-        close=df["Close"],
-        name="K线",
-    ))
+    fig.add_trace(
+        go.Candlestick(
+            x=df.index,
+            open=df["Open"],
+            high=df["High"],
+            low=df["Low"],
+            close=df["Close"],
+            name="K线",
+        )
+    )
     for col in ["MA5", "MA10", "MA20", "MA60"]:
         if col in df.columns:
             fig.add_trace(go.Scatter(x=df.index, y=df[col], mode="lines", name=col))
@@ -289,11 +349,33 @@ def plot_price(df: pd.DataFrame, title: str):
     buy_points = df[(df.get("Trade", 0) > 0)] if "Trade" in df.columns else pd.DataFrame()
     sell_points = df[(df.get("Trade", 0) < 0)] if "Trade" in df.columns else pd.DataFrame()
     if not buy_points.empty:
-        fig.add_trace(go.Scatter(x=buy_points.index, y=buy_points["Close"], mode="markers", name="买入", marker=dict(symbol="triangle-up", size=10)))
+        fig.add_trace(
+            go.Scatter(
+                x=buy_points.index,
+                y=buy_points["Close"],
+                mode="markers",
+                name="买入",
+                marker=dict(symbol="triangle-up", size=10),
+            )
+        )
     if not sell_points.empty:
-        fig.add_trace(go.Scatter(x=sell_points.index, y=sell_points["Close"], mode="markers", name="卖出", marker=dict(symbol="triangle-down", size=10)))
+        fig.add_trace(
+            go.Scatter(
+                x=sell_points.index,
+                y=sell_points["Close"],
+                mode="markers",
+                name="卖出",
+                marker=dict(symbol="triangle-down", size=10),
+            )
+        )
 
-    fig.update_layout(title=title, xaxis_title="日期", yaxis_title="价格", height=650, xaxis_rangeslider_visible=False)
+    fig.update_layout(
+        title=title,
+        xaxis_title="日期",
+        yaxis_title="价格",
+        height=650,
+        xaxis_rangeslider_visible=False,
+    )
     return fig
 
 
@@ -325,7 +407,7 @@ try:
             st.info("请选择一个本地行情 CSV 文件。")
             st.stop()
         raw = load_csv_data(uploaded_file)
-        raw = raw.loc[pd.to_datetime(start):pd.to_datetime(end)]
+        raw = raw.loc[pd.to_datetime(start) : pd.to_datetime(end)]
         if raw.empty:
             raise ValueError("本地 CSV 在所选日期范围内没有行情数据。")
     else:
@@ -367,8 +449,13 @@ try:
         enable_limit_filter=enable_limit_filter,
         limit_rate=float(limit_rate),
     )
-    display_df = indicator_df.join(strategy_df[[c for c in strategy_df.columns if c not in indicator_df.columns]], how="left")
-    display_df = display_df.join(bt[["Trade", "Equity", "BuyHold_Equity", "Drawdown"]], how="left")
+    display_df = indicator_df.join(
+        strategy_df[[c for c in strategy_df.columns if c not in indicator_df.columns]],
+        how="left",
+    )
+    display_df = display_df.join(
+        bt[["Trade", "Equity", "BuyHold_Equity", "Drawdown"]], how="left"
+    )
 
     st.subheader(f"{market} · {symbol.upper()} 回测结果")
     c1, c2, c3, c4 = st.columns(4)
@@ -385,17 +472,28 @@ try:
 
     c9, c10, c11, c12 = st.columns(4)
     c9.metric("持仓暴露", pct(metrics.get("Exposure", 0)))
-    c10.metric("盈亏比", "∞" if metrics.get("Profit Factor") == float("inf") else f"{metrics.get('Profit Factor', 0):.2f}")
+    c10.metric(
+        "盈亏比",
+        "∞" if metrics.get("Profit Factor") == float("inf") else f"{metrics.get('Profit Factor', 0):.2f}",
+    )
     c11.metric("总交易成本", num(metrics.get("Total Cost", 0)))
     c12.metric("平均持仓天数", f"{metrics.get('Average Holding Days', 0):.1f}")
 
     if ml_info:
-        st.info(f"机器学习模型测试集准确率：{ml_info['test_accuracy']:.2%}；训练样本：{ml_info['train_size']}；测试样本：{ml_info['test_size']}。")
+        st.info(
+            f"机器学习模型测试集准确率：{ml_info['test_accuracy']:.2%}；"
+            f"训练样本：{ml_info['train_size']}；测试样本：{ml_info['test_size']}。"
+        )
 
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["行情与信号", "资金曲线", "技术指标", "交易明细", "每日持仓", "原始数据"])
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
+        ["行情与信号", "资金曲线", "技术指标", "交易明细", "每日持仓", "原始数据"]
+    )
 
     with tab1:
-        st.plotly_chart(plot_price(display_df, f"{symbol.upper()} K线与交易信号"), use_container_width=True)
+        st.plotly_chart(
+            plot_price(display_df, f"{symbol.upper()} K线与交易信号"),
+            use_container_width=True,
+        )
         st.plotly_chart(plot_volume(display_df), use_container_width=True)
 
     with tab2:
@@ -404,7 +502,24 @@ try:
 
     with tab3:
         st.write("技术指标数据预览")
-        cols = [c for c in ["Close", "MA5", "MA10", "MA20", "MA60", "RSI", "MACD", "MACD_SIGNAL", "MACD_HIST", "BB_UPPER", "BB_MID", "BB_LOWER"] if c in display_df.columns]
+        cols = [
+            c
+            for c in [
+                "Close",
+                "MA5",
+                "MA10",
+                "MA20",
+                "MA60",
+                "RSI",
+                "MACD",
+                "MACD_SIGNAL",
+                "MACD_HIST",
+                "BB_UPPER",
+                "BB_MID",
+                "BB_LOWER",
+            ]
+            if c in display_df.columns
+        ]
         st.dataframe(display_df[cols].tail(100), use_container_width=True)
 
     with tab4:
@@ -413,9 +528,8 @@ try:
             st.warning("当前参数下没有产生完整交易。")
         else:
             show_trades = trades.copy()
-            for col in ["Return"]:
-                if col in show_trades.columns:
-                    show_trades[col] = show_trades[col].map(lambda x: f"{x:.2%}")
+            if "Return" in show_trades.columns:
+                show_trades["Return"] = show_trades["Return"].map(lambda x: f"{x:.2%}")
             st.dataframe(show_trades, use_container_width=True)
             st.download_button(
                 "下载交易明细 CSV",
@@ -426,7 +540,23 @@ try:
 
     with tab5:
         st.write("每日持仓用于检查回测是否符合真实交易逻辑：现金、股数、市值、动作、无法成交原因。")
-        holding_cols = [c for c in ["Close", "Cash", "Shares", "Market_Value", "Equity", "Actual_Position", "Action", "Reason", "Commission", "Sell_Tax", "Slippage_Cost"] if c in display_df.columns]
+        holding_cols = [
+            c
+            for c in [
+                "Close",
+                "Cash",
+                "Shares",
+                "Market_Value",
+                "Equity",
+                "Actual_Position",
+                "Action",
+                "Reason",
+                "Commission",
+                "Sell_Tax",
+                "Slippage_Cost",
+            ]
+            if c in display_df.columns
+        ]
         st.dataframe(display_df[holding_cols].tail(300), use_container_width=True)
         st.download_button(
             "下载每日持仓 CSV",
@@ -454,7 +584,7 @@ try:
 - **策略信号**：策略先生成 Signal，再 shift 一天形成 Position，避免使用未来信息。
 - **A股数据**：使用 6 位股票代码，默认前复权价格，适合多数技术指标与回测。
 - **回测**：逐日维护现金、股数、市值和资金曲线，而不是简单向量化收益。
-- **A股交易规则近似**：支持 100 股整数手、T+1、最低佣金、涨跌停/停牌无法成交近似。
+- **A股交易规则近似**：支持 100 股整数手、T+1、最低佣金、涨跌停无法成交近似。
 - **风险指标**：最大回撤衡量最糟糕的资金下跌幅度；夏普比率衡量单位波动下的收益。
         """
     )

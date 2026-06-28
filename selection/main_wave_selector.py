@@ -16,6 +16,8 @@ RESULT_COLUMNS = [
     "symbol",
     "sector",
     "feature_date",
+    "requested_select_date",
+    "actual_feature_date",
     "final_score",
     "main_wave_score",
     "raw_score",
@@ -50,6 +52,20 @@ def _empty_result(errors: list[str]) -> pd.DataFrame:
     return result
 
 
+def _resolve_actual_feature_date(
+    index: pd.Index, target_date: pd.Timestamp | None
+) -> pd.Timestamp | None:
+    date_index = pd.DatetimeIndex(index)
+    if date_index.empty:
+        return None
+    if target_date is None:
+        return date_index.max()
+    available = date_index[date_index <= target_date]
+    if available.empty:
+        return None
+    return available.max()
+
+
 def run_main_wave_candidate_selection(
     symbols: list[str],
     start: str,
@@ -62,10 +78,12 @@ def run_main_wave_candidate_selection(
     disable_proxy: bool = True,
 ) -> pd.DataFrame:
     """Build and rank a rule-based A-share main-wave candidate cross-section."""
-    cutoff = pd.to_datetime(select_date or end)
+    requested_cutoff = pd.to_datetime(select_date or end)
+    requested_select_date = pd.to_datetime(select_date) if select_date else None
     errors: list[str] = []
     rows: list[dict] = []
     seen: set[str] = set()
+    prepared_rows: list[dict] = []
 
     for raw_symbol in symbols:
         try:
@@ -85,23 +103,54 @@ def run_main_wave_candidate_selection(
             )
             features = calculate_momentum_features(prices)
             features = calculate_volume_price_features(features)
-            available = features.loc[features.index <= cutoff]
-            if available.empty:
-                raise ValueError(f"选择日期 {cutoff.date()} 之前没有行情")
-            feature_date = available.index[-1]
-            row = available.iloc[-1].to_dict()
-            row.update(
+            prepared_rows.append(
                 {
                     "symbol": symbol,
                     "sector": get_stock_sector(symbol),
+                    "features": features,
+                }
+            )
+        except Exception as exc:
+            errors.append(f"{raw_symbol}: {exc}")
+
+    if not prepared_rows or top_n <= 0:
+        return _empty_result(errors)
+
+    common_target_date = None
+    if requested_select_date is None:
+        common_dates = [
+            _resolve_actual_feature_date(item["features"].index, requested_cutoff)
+            for item in prepared_rows
+        ]
+        common_dates = [date for date in common_dates if date is not None]
+        if common_dates:
+            common_target_date = min(common_dates)
+
+    for item in prepared_rows:
+        try:
+            target_date = requested_select_date or common_target_date or requested_cutoff
+            feature_date = _resolve_actual_feature_date(item["features"].index, target_date)
+            if feature_date is None:
+                raise ValueError(f"选择日期 {target_date.date()} 之前没有行情数据")
+            row = item["features"].loc[feature_date].to_dict()
+            row.update(
+                {
+                    "symbol": item["symbol"],
+                    "sector": item["sector"],
                     "feature_date": feature_date,
+                    "requested_select_date": (
+                        requested_select_date.strftime("%Y-%m-%d")
+                        if requested_select_date is not None
+                        else None
+                    ),
+                    "actual_feature_date": feature_date.strftime("%Y-%m-%d"),
                 }
             )
             rows.append(row)
         except Exception as exc:
-            errors.append(f"{raw_symbol}: {exc}")
+            errors.append(f"{item['symbol']}: {exc}")
 
-    if not rows or top_n <= 0:
+    if not rows:
         return _empty_result(errors)
 
     cross_section = pd.DataFrame(rows)

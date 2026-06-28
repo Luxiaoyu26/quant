@@ -82,6 +82,65 @@ def test_default_stock_pool_can_produce_candidates_without_network(monkeypatch):
     assert (pd.to_datetime(result["feature_date"]) <= pd.Timestamp("2024-04-05")).all()
 
 
+def test_selector_falls_back_to_previous_available_trading_day(monkeypatch):
+    monkeypatch.setattr(selector, "load_price_data", lambda *args, **kwargs: make_prices())
+
+    result = selector.run_main_wave_candidate_selection(
+        ["600519", "000858"],
+        start="2024-01-01",
+        end="2024-04-09",
+        select_date="2024-04-13",
+        top_n=2,
+    )
+
+    assert not result.empty
+    assert set(result["requested_select_date"]) == {"2024-04-13"}
+    assert set(pd.to_datetime(result["actual_feature_date"])) == {pd.Timestamp("2024-04-09")}
+
+
+def test_selector_uses_common_latest_date_when_select_date_not_provided(monkeypatch):
+    def fake_load(symbol, *args, **kwargs):
+        if symbol == "600519":
+            return make_prices()
+        prices = make_prices().iloc[:-2].copy()
+        return prices
+
+    monkeypatch.setattr(selector, "load_price_data", fake_load)
+
+    result = selector.run_main_wave_candidate_selection(
+        ["600519", "000858"],
+        start="2024-01-01",
+        end="2024-04-09",
+        select_date=None,
+        top_n=2,
+    )
+
+    assert not result.empty
+    assert result["requested_select_date"].isna().all()
+    assert set(pd.to_datetime(result["actual_feature_date"])) == {pd.Timestamp("2024-04-07")}
+
+
+def test_selector_skips_symbol_without_data_before_requested_date(monkeypatch):
+    def fake_load(symbol, *args, **kwargs):
+        if symbol == "000858":
+            prices = make_prices()
+            return prices.loc["2024-04-08":]
+        return make_prices()
+
+    monkeypatch.setattr(selector, "load_price_data", fake_load)
+
+    result = selector.run_main_wave_candidate_selection(
+        ["600519", "000858"],
+        start="2024-01-01",
+        end="2024-04-09",
+        select_date="2024-04-07",
+        top_n=2,
+    )
+
+    assert set(result["symbol"]) == {"600519"}
+    assert any("000858" in error for error in result.attrs["errors"])
+
+
 def test_selector_returns_standard_empty_result_when_all_downloads_fail(monkeypatch):
     def fail(*args, **kwargs):
         raise RuntimeError("offline")

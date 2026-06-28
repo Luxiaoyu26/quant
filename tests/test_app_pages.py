@@ -8,10 +8,10 @@ import pytest
 def test_app_exposes_single_stock_and_main_wave_pages():
     source = Path("app.py").read_text(encoding="utf-8")
 
-    assert '["单股回测", "主升浪候选池"]' in source
     assert "def render_main_wave_page" in source
     assert "run_main_wave_candidate_selection" in source
-    assert "当前 V2 主升浪评分重点关注" in source
+    assert "actual_feature_date" in source
+    assert "requested_select_date" in source
 
 
 @pytest.mark.filterwarnings("ignore:Type google.protobuf.*:DeprecationWarning")
@@ -53,6 +53,8 @@ def test_main_wave_page_generates_default_pool_result(monkeypatch):
         "symbol",
         "sector",
         "final_score",
+        "requested_select_date",
+        "actual_feature_date",
         "ret_20",
         "ret_60",
         "sector_strength_score",
